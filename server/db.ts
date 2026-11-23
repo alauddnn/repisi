@@ -218,8 +218,24 @@ export interface AuditLog {
   userName: string;
   userRole: 'admin' | 'owner' | 'Administrator' | 'Petugas';
   action: string;
-  module: 'Karyawan' | 'Absensi' | 'Lembur' | 'Kasbon' | 'Gaji' | 'Operasional' | 'Pengaturan' | 'Sistem' | 'Proyek' | 'Pengguna';
+  module: 'Karyawan' | 'Absensi' | 'Lembur' | 'Kasbon' | 'Gaji' | 'Operasional' | 'Pengaturan' | 'Sistem' | 'Proyek' | 'Pengguna' | 'Dokumen';
   details: string;
+}
+
+export interface ProjectDocument {
+  id: string;
+  projectId: string;
+  category: string;
+  fileName: string;
+  filePath: string;
+  storageBucket?: string;
+  fileSize: number;
+  mimeType: string;
+  uploadedBy?: string;
+  createdAt: string;
+  updatedAt?: string;
+  viewUrl?: string;
+  signedUrl?: string;
 }
 
 export interface AppUser {
@@ -258,6 +274,7 @@ export interface DatabaseSchema {
   salaryPayments: SalaryPayment[];
   operationalExpenses: OperationalExpense[];
   operationalExpenseAttachments: OperationalExpenseAttachment[];
+  projectDocuments?: ProjectDocument[];
   auditLogs: AuditLog[];
   users: AppUser[];
   projects: Project[];
@@ -589,6 +606,7 @@ class DatabaseManager {
           salaryPayments: parsed.salaryPayments || [],
           operationalExpenses: parsed.operationalExpenses || [],
           operationalExpenseAttachments: parsed.operationalExpenseAttachments || [],
+          projectDocuments: parsed.projectDocuments || [],
           auditLogs: parsed.auditLogs || [],
           users,
           projects,
@@ -608,6 +626,7 @@ class DatabaseManager {
       salaryPayments: [],
       operationalExpenses: [],
       operationalExpenseAttachments: [],
+      projectDocuments: [],
       auditLogs: [
         {
           id: 'log-init',

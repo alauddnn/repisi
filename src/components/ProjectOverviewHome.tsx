@@ -8,6 +8,7 @@ import {
   Truck,
   Receipt,
   FileSpreadsheet,
+  FileText,
   ChevronRight,
 } from 'lucide-react';
 import { Project, ProjectOverviewStats } from '../types.js';
@@ -21,6 +22,7 @@ export type ProjectSubModule =
   | 'kasbon'
   | 'transport'
   | 'operasional'
+  | 'dokumen'
   | 'laporan';
 
 interface ProjectOverviewHomeProps {
@@ -46,6 +48,7 @@ export const ProjectOverviewHome: React.FC<ProjectOverviewHomeProps> = ({
   const animKasbon = useAnimatedNumber(stats.totalKasbon);
   const animTransport = useAnimatedNumber(stats.totalTransportationCost);
   const animOperational = useAnimatedNumber(stats.totalOperationalCost);
+  const animDocuments = useAnimatedNumber(stats.totalDocuments || 0);
 
   return (
     <div className="space-y-7 kms-fade-in">
@@ -212,24 +215,32 @@ export const ProjectOverviewHome: React.FC<ProjectOverviewHomeProps> = ({
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="grid grid-cols-3 gap-2.5 sm:gap-3.5 md:grid-cols-2 lg:grid-cols-3 md:gap-5">
           {/* A. Data Karyawan */}
           <div
             onClick={() => onSelectModule('karyawan')}
-            className="kms-module-card bg-white p-6 rounded-2xl border border-slate-200 hover:border-[#2563EB] shadow-[0_1px_3px_rgba(15,23,42,0.03)] cursor-pointer group flex flex-col justify-between"
+            className="kms-module-card bg-white p-3 sm:p-4 md:p-6 rounded-xl md:rounded-2xl border border-slate-200 hover:border-[#2563EB] shadow-[0_1px_3px_rgba(15,23,42,0.03)] cursor-pointer group flex flex-col justify-between items-center text-center md:items-stretch md:text-left min-h-[112px] sm:min-h-[124px] md:min-h-0"
           >
-            <div>
-              <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#2563EB] group-hover:scale-105 transition-transform flex items-center justify-center mb-4">
-                <Users className="w-5 h-5" />
+            <div className="flex flex-col items-center md:items-start w-full">
+              <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-blue-50 text-[#2563EB] group-hover:scale-105 transition-transform flex items-center justify-center mb-2 md:mb-4 shrink-0">
+                <Users className="w-4 h-4 md:w-5 md:h-5" />
               </div>
-              <h3 className="text-sm font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors">
+              <h3 className="md:hidden text-[11px] sm:text-xs font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors leading-tight line-clamp-2">
+                A. Data Karyawan
+              </h3>
+              <h3 className="hidden md:block text-sm font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors">
                 A. Data Karyawan Proyek
               </h3>
-              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+              <p className="hidden md:block text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Kelola penugasan tenaga kerja dari master data ke proyek, peran kerja, kontak, dan riwayat penempatan.
               </p>
             </div>
-            <div className="mt-5 pt-3.5 border-t border-slate-100 flex items-center justify-between text-xs">
+            <div className="md:hidden mt-2 pt-1.5 border-t border-slate-100 w-full">
+              <span className="text-[10px] font-semibold text-[#2563EB] font-mono tabular-nums block truncate">
+                {animAssigned} Org
+              </span>
+            </div>
+            <div className="hidden md:flex mt-5 pt-3.5 border-t border-slate-100 items-center justify-between text-xs">
               <span className="font-semibold text-[#2563EB] font-mono tabular-nums">
                 {animAssigned} Karyawan Ditugaskan
               </span>
@@ -240,20 +251,28 @@ export const ProjectOverviewHome: React.FC<ProjectOverviewHomeProps> = ({
           {/* B. Absensi Karyawan */}
           <div
             onClick={() => onSelectModule('absensi')}
-            className="kms-module-card bg-white p-6 rounded-2xl border border-slate-200 hover:border-[#2563EB] shadow-[0_1px_3px_rgba(15,23,42,0.03)] cursor-pointer group flex flex-col justify-between"
+            className="kms-module-card bg-white p-3 sm:p-4 md:p-6 rounded-xl md:rounded-2xl border border-slate-200 hover:border-[#2563EB] shadow-[0_1px_3px_rgba(15,23,42,0.03)] cursor-pointer group flex flex-col justify-between items-center text-center md:items-stretch md:text-left min-h-[112px] sm:min-h-[124px] md:min-h-0"
           >
-            <div>
-              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 group-hover:scale-105 transition-transform flex items-center justify-center mb-4">
-                <CalendarCheck className="w-5 h-5" />
+            <div className="flex flex-col items-center md:items-start w-full">
+              <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-emerald-50 text-emerald-600 group-hover:scale-105 transition-transform flex items-center justify-center mb-2 md:mb-4 shrink-0">
+                <CalendarCheck className="w-4 h-4 md:w-5 md:h-5" />
               </div>
-              <h3 className="text-sm font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors">
+              <h3 className="md:hidden text-[11px] sm:text-xs font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors leading-tight line-clamp-2">
+                B. Absensi
+              </h3>
+              <h3 className="hidden md:block text-sm font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors">
                 B. Absensi Karyawan Proyek
               </h3>
-              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+              <p className="hidden md:block text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Pencatatan dan koreksi kehadiran harian (penuh/setengah hari), jam masuk-pulang, serta jam lembur di lokasi proyek.
               </p>
             </div>
-            <div className="mt-5 pt-3.5 border-t border-slate-100 flex items-center justify-between text-xs">
+            <div className="md:hidden mt-2 pt-1.5 border-t border-slate-100 w-full">
+              <span className="text-[10px] font-semibold text-emerald-700 font-mono tabular-nums block truncate">
+                {animPresent} Hadir
+              </span>
+            </div>
+            <div className="hidden md:flex mt-5 pt-3.5 border-t border-slate-100 items-center justify-between text-xs">
               <span className="font-semibold text-emerald-700 font-mono tabular-nums">
                 {animPresent} Hadir Hari Ini
               </span>
@@ -264,20 +283,28 @@ export const ProjectOverviewHome: React.FC<ProjectOverviewHomeProps> = ({
           {/* C. Sistem Lembur */}
           <div
             onClick={() => onSelectModule('lembur')}
-            className="kms-module-card bg-white p-6 rounded-2xl border border-slate-200 hover:border-[#2563EB] shadow-[0_1px_3px_rgba(15,23,42,0.03)] cursor-pointer group flex flex-col justify-between"
+            className="kms-module-card bg-white p-3 sm:p-4 md:p-6 rounded-xl md:rounded-2xl border border-slate-200 hover:border-[#2563EB] shadow-[0_1px_3px_rgba(15,23,42,0.03)] cursor-pointer group flex flex-col justify-between items-center text-center md:items-stretch md:text-left min-h-[112px] sm:min-h-[124px] md:min-h-0"
           >
-            <div>
-              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 group-hover:scale-105 transition-transform flex items-center justify-center mb-4">
-                <Clock className="w-5 h-5" />
+            <div className="flex flex-col items-center md:items-start w-full">
+              <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-amber-50 text-amber-600 group-hover:scale-105 transition-transform flex items-center justify-center mb-2 md:mb-4 shrink-0">
+                <Clock className="w-4 h-4 md:w-5 md:h-5" />
               </div>
-              <h3 className="text-sm font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors">
+              <h3 className="md:hidden text-[11px] sm:text-xs font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors leading-tight line-clamp-2">
+                C. Lembur
+              </h3>
+              <h3 className="hidden md:block text-sm font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors">
                 C. Sistem Lembur Proyek
               </h3>
-              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+              <p className="hidden md:block text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Catatan lembur harian, tarif upah lembur resmi perusahaan, total biaya, dan status persetujuan administrator.
               </p>
             </div>
-            <div className="mt-5 pt-3.5 border-t border-slate-100 flex items-center justify-between text-xs">
+            <div className="md:hidden mt-2 pt-1.5 border-t border-slate-100 w-full">
+              <span className="text-[10px] font-semibold text-amber-700 font-mono tabular-nums block truncate">
+                {animOvertime} Org
+              </span>
+            </div>
+            <div className="hidden md:flex mt-5 pt-3.5 border-t border-slate-100 items-center justify-between text-xs">
               <span className="font-semibold text-amber-700 font-mono tabular-nums">
                 {animOvertime} Karyawan Lembur
               </span>
@@ -288,20 +315,28 @@ export const ProjectOverviewHome: React.FC<ProjectOverviewHomeProps> = ({
           {/* D. Kasbon Karyawan */}
           <div
             onClick={() => onSelectModule('kasbon')}
-            className="kms-module-card bg-white p-6 rounded-2xl border border-slate-200 hover:border-[#2563EB] shadow-[0_1px_3px_rgba(15,23,42,0.03)] cursor-pointer group flex flex-col justify-between"
+            className="kms-module-card bg-white p-3 sm:p-4 md:p-6 rounded-xl md:rounded-2xl border border-slate-200 hover:border-[#2563EB] shadow-[0_1px_3px_rgba(15,23,42,0.03)] cursor-pointer group flex flex-col justify-between items-center text-center md:items-stretch md:text-left min-h-[112px] sm:min-h-[124px] md:min-h-0"
           >
-            <div>
-              <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 group-hover:scale-105 transition-transform flex items-center justify-center mb-4">
-                <Wallet className="w-5 h-5" />
+            <div className="flex flex-col items-center md:items-start w-full">
+              <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-violet-50 text-violet-600 group-hover:scale-105 transition-transform flex items-center justify-center mb-2 md:mb-4 shrink-0">
+                <Wallet className="w-4 h-4 md:w-5 md:h-5" />
               </div>
-              <h3 className="text-sm font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors">
+              <h3 className="md:hidden text-[11px] sm:text-xs font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors leading-tight line-clamp-2">
+                D. Kasbon
+              </h3>
+              <h3 className="hidden md:block text-sm font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors">
                 D. Kasbon Karyawan
               </h3>
-              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+              <p className="hidden md:block text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Pengajuan kasbon karyawan proyek, bukti pendukung, pencatatan pelunasan manual, dan riwayat per karyawan.
               </p>
             </div>
-            <div className="mt-5 pt-3.5 border-t border-slate-100 flex items-center justify-between text-xs">
+            <div className="md:hidden mt-2 pt-1.5 border-t border-slate-100 w-full">
+              <span className="text-[10px] font-semibold text-violet-700 font-mono tabular-nums block truncate">
+                {formatRupiah(animKasbon)}
+              </span>
+            </div>
+            <div className="hidden md:flex mt-5 pt-3.5 border-t border-slate-100 items-center justify-between text-xs">
               <span className="font-semibold text-violet-700 font-mono tabular-nums">
                 {formatRupiah(animKasbon)} Sisa Kasbon
               </span>
@@ -312,20 +347,28 @@ export const ProjectOverviewHome: React.FC<ProjectOverviewHomeProps> = ({
           {/* E. Biaya Transportasi */}
           <div
             onClick={() => onSelectModule('transport')}
-            className="kms-module-card bg-white p-6 rounded-2xl border border-slate-200 hover:border-[#2563EB] shadow-[0_1px_3px_rgba(15,23,42,0.03)] cursor-pointer group flex flex-col justify-between"
+            className="kms-module-card bg-white p-3 sm:p-4 md:p-6 rounded-xl md:rounded-2xl border border-slate-200 hover:border-[#2563EB] shadow-[0_1px_3px_rgba(15,23,42,0.03)] cursor-pointer group flex flex-col justify-between items-center text-center md:items-stretch md:text-left min-h-[112px] sm:min-h-[124px] md:min-h-0"
           >
-            <div>
-              <div className="w-10 h-10 rounded-xl bg-sky-50 text-sky-600 group-hover:scale-105 transition-transform flex items-center justify-center mb-4">
-                <Truck className="w-5 h-5" />
+            <div className="flex flex-col items-center md:items-start w-full">
+              <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-sky-50 text-sky-600 group-hover:scale-105 transition-transform flex items-center justify-center mb-2 md:mb-4 shrink-0">
+                <Truck className="w-4 h-4 md:w-5 md:h-5" />
               </div>
-              <h3 className="text-sm font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors">
+              <h3 className="md:hidden text-[11px] sm:text-xs font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors leading-tight line-clamp-2">
+                E. Transportasi
+              </h3>
+              <h3 className="hidden md:block text-sm font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors">
                 E. Biaya Transportasi Proyek
               </h3>
-              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+              <p className="hidden md:block text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Pencatatan bensin, e-toll, parkir, armada kendaraan dinas, PIC penanggung jawab, serta lampiran foto bukti.
               </p>
             </div>
-            <div className="mt-5 pt-3.5 border-t border-slate-100 flex items-center justify-between text-xs">
+            <div className="md:hidden mt-2 pt-1.5 border-t border-slate-100 w-full">
+              <span className="text-[10px] font-semibold text-sky-700 font-mono tabular-nums block truncate">
+                {formatRupiah(animTransport)}
+              </span>
+            </div>
+            <div className="hidden md:flex mt-5 pt-3.5 border-t border-slate-100 items-center justify-between text-xs">
               <span className="font-semibold text-sky-700 font-mono tabular-nums">
                 {formatRupiah(animTransport)} Total
               </span>
@@ -336,22 +379,62 @@ export const ProjectOverviewHome: React.FC<ProjectOverviewHomeProps> = ({
           {/* F. Pengeluaran Operasional Proyek */}
           <div
             onClick={() => onSelectModule('operasional')}
-            className="kms-module-card bg-white p-6 rounded-2xl border border-slate-200 hover:border-[#2563EB] shadow-[0_1px_3px_rgba(15,23,42,0.03)] cursor-pointer group flex flex-col justify-between"
+            className="kms-module-card bg-white p-3 sm:p-4 md:p-6 rounded-xl md:rounded-2xl border border-slate-200 hover:border-[#2563EB] shadow-[0_1px_3px_rgba(15,23,42,0.03)] cursor-pointer group flex flex-col justify-between items-center text-center md:items-stretch md:text-left min-h-[112px] sm:min-h-[124px] md:min-h-0"
           >
-            <div>
-              <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 group-hover:scale-105 transition-transform flex items-center justify-center mb-4">
-                <Receipt className="w-5 h-5" />
+            <div className="flex flex-col items-center md:items-start w-full">
+              <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-rose-50 text-rose-600 group-hover:scale-105 transition-transform flex items-center justify-center mb-2 md:mb-4 shrink-0">
+                <Receipt className="w-4 h-4 md:w-5 md:h-5" />
               </div>
-              <h3 className="text-sm font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors">
+              <h3 className="md:hidden text-[11px] sm:text-xs font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors leading-tight line-clamp-2">
+                F. Operasional
+              </h3>
+              <h3 className="hidden md:block text-sm font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors">
                 F. Pengeluaran Operasional Lapangan
               </h3>
-              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+              <p className="hidden md:block text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Pencatatan pengeluaran riil lapangan, alat bantu darurat, konsumsi, dan biaya operasional langsung proyek.
               </p>
             </div>
-            <div className="mt-5 pt-3.5 border-t border-slate-100 flex items-center justify-between text-xs">
+            <div className="md:hidden mt-2 pt-1.5 border-t border-slate-100 w-full">
+              <span className="text-[10px] font-semibold text-rose-700 font-mono tabular-nums block truncate">
+                {formatRupiah(animOperational)}
+              </span>
+            </div>
+            <div className="hidden md:flex mt-5 pt-3.5 border-t border-slate-100 items-center justify-between text-xs">
               <span className="font-semibold text-rose-700 font-mono tabular-nums">
                 {formatRupiah(animOperational)} Total
+              </span>
+              <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-[#2563EB] group-hover:translate-x-1 transition-all" />
+            </div>
+          </div>
+
+          {/* G. Dokumen & Surat Proyek (PDF) */}
+          <div
+            onClick={() => onSelectModule('dokumen')}
+            className="kms-module-card bg-white p-3 sm:p-4 md:p-6 rounded-xl md:rounded-2xl border border-slate-200 hover:border-[#2563EB] shadow-[0_1px_3px_rgba(15,23,42,0.03)] cursor-pointer group flex flex-col justify-between items-center text-center md:items-stretch md:text-left min-h-[112px] sm:min-h-[124px] md:min-h-0"
+          >
+            <div className="flex flex-col items-center md:items-start w-full">
+              <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-indigo-50 text-indigo-600 group-hover:scale-105 transition-transform flex items-center justify-center mb-2 md:mb-4 shrink-0">
+                <FileText className="w-4 h-4 md:w-5 md:h-5" />
+              </div>
+              <h3 className="md:hidden text-[11px] sm:text-xs font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors leading-tight line-clamp-2">
+                G. Dokumen
+              </h3>
+              <h3 className="hidden md:block text-sm font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors">
+                G. Dokumen & Surat Proyek
+              </h3>
+              <p className="hidden md:block text-xs text-slate-500 mt-1.5 leading-relaxed">
+                Arsip surat proyek format PDF: SPK, MoU / Kontrak, Faktur / Invoice, Surat Jalan, BAST, dan dokumen resmi lainnya.
+              </p>
+            </div>
+            <div className="md:hidden mt-2 pt-1.5 border-t border-slate-100 w-full">
+              <span className="text-[10px] font-semibold text-indigo-700 font-mono tabular-nums block truncate">
+                {animDocuments} PDF
+              </span>
+            </div>
+            <div className="hidden md:flex mt-5 pt-3.5 border-t border-slate-100 items-center justify-between text-xs">
+              <span className="font-semibold text-indigo-700 font-mono tabular-nums">
+                {animDocuments} Dokumen PDF
               </span>
               <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-[#2563EB] group-hover:translate-x-1 transition-all" />
             </div>
@@ -360,25 +443,33 @@ export const ProjectOverviewHome: React.FC<ProjectOverviewHomeProps> = ({
           {/* H. Laporan & Rekapitulasi Komprehensif Proyek (H1 - H5) */}
           <div
             onClick={() => onSelectModule('laporan')}
-            className="kms-module-card bg-white p-6 rounded-2xl border border-slate-200 hover:border-[#2563EB] shadow-[0_1px_3px_rgba(15,23,42,0.03)] cursor-pointer group flex flex-col justify-between md:col-span-2 lg:col-span-3"
+            className="kms-module-card bg-white p-3 sm:p-4 md:p-6 rounded-xl md:rounded-2xl border border-slate-200 hover:border-[#2563EB] shadow-[0_1px_3px_rgba(15,23,42,0.03)] cursor-pointer group flex flex-col justify-between items-center text-center md:items-stretch md:text-left min-h-[112px] sm:min-h-[124px] md:min-h-0 md:col-span-1 lg:col-span-2"
           >
-            <div>
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#2563EB] group-hover:scale-105 transition-transform flex items-center justify-center">
-                  <FileSpreadsheet className="w-5 h-5" />
+            <div className="flex flex-col items-center md:items-stretch w-full">
+              <div className="flex flex-wrap items-center justify-center md:justify-between gap-2 mb-2 md:mb-3">
+                <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-blue-50 text-[#2563EB] group-hover:scale-105 transition-transform flex items-center justify-center shrink-0">
+                  <FileSpreadsheet className="w-4 h-4 md:w-5 md:h-5" />
                 </div>
-                <span className="text-xs font-medium text-slate-500">
+                <span className="hidden md:inline text-xs font-medium text-slate-500">
                   Pusat Rekap Gaji · Slip Gaji · Cetak PDF · Ekspor Excel Proyek
                 </span>
               </div>
-              <h3 className="text-base font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors">
+              <h3 className="md:hidden text-[11px] sm:text-xs font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors leading-tight line-clamp-2">
+                H. Laporan Proyek
+              </h3>
+              <h3 className="hidden md:block text-base font-semibold text-slate-900 group-hover:text-[#2563EB] transition-colors">
                 H. Laporan & Rekapitulasi Komprehensif Proyek
               </h3>
-              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed max-w-3xl">
+              <p className="hidden md:block text-xs text-slate-500 mt-1.5 leading-relaxed max-w-3xl">
                 Pusat rekap keuangan resmi proyek {project.name} ({project.code}): rekap gaji per karyawan, rekap total gaji seluruh karyawan, biaya transportasi, pengeluaran operasional lapangan, dan realisasi seluruh anggaran proyek.
               </p>
             </div>
-            <div className="mt-5 pt-3.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="md:hidden mt-2 pt-1.5 border-t border-slate-100 w-full">
+              <span className="text-[10px] font-semibold text-[#155EEF] font-mono tabular-nums block truncate">
+                {stats.realizationPercentage}% Realisasi
+              </span>
+            </div>
+            <div className="hidden md:flex mt-5 pt-3.5 border-t border-slate-100 flex-wrap items-center justify-between gap-2 text-xs">
               <span className="font-semibold text-[#155EEF]">
                 Realisasi Anggaran Proyek: {stats.realizationPercentage}% (Sisa Anggaran: {formatRupiah(stats.budgetRemaining)})
               </span>

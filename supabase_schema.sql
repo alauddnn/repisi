@@ -305,3 +305,22 @@ CREATE TABLE IF NOT EXISTS operational_expense_attachments (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_expense_attachments_expense_id ON operational_expense_attachments(expense_id);
+
+-- ============================================================================
+-- 15. TABEL DOKUMEN & SURAT PROYEK (MODUL G: SPK, MOU, FAKTUR, DLL - PDF)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS project_documents (
+  id VARCHAR(64) PRIMARY KEY,
+  project_id VARCHAR(64) NOT NULL REFERENCES projects(id) ON UPDATE CASCADE ON DELETE CASCADE,
+  category VARCHAR(100) NOT NULL DEFAULT 'Lainnya',
+  file_name VARCHAR(255) NOT NULL,
+  file_path TEXT NOT NULL,
+  storage_bucket VARCHAR(100) DEFAULT 'project-documents',
+  file_size INT NOT NULL DEFAULT 0,
+  mime_type VARCHAR(100) NOT NULL DEFAULT 'application/pdf',
+  uploaded_by VARCHAR(150),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_project_documents_proj_created ON project_documents(project_id, created_at DESC);
+

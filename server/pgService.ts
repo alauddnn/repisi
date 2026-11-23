@@ -15,9 +15,10 @@ import {
   ProjectAssignment,
   ProjectExpense,
   ProjectOverviewStats,
+  ProjectDocument,
 } from '../src/types.js';
 import { AppUser } from './db.js';
-import { deleteFromStorage } from './supabaseStorage.js';
+import { deleteFromStorage, deleteDocumentFromStorage } from './supabaseStorage.js';
 
 // --- CALCULATION HELPERS ---
 export function calcBasicPayByStatus(status: string, dailyWage: number | undefined | null): number {
@@ -626,7 +627,22 @@ export async function ensureAllSchemasOnce(): Promise<void> {
           created_at TIMESTAMPTZ DEFAULT NOW()
         );
 
+        CREATE TABLE IF NOT EXISTS project_documents (
+          id VARCHAR(64) PRIMARY KEY,
+          project_id VARCHAR(64) NOT NULL REFERENCES projects(id) ON UPDATE CASCADE ON DELETE CASCADE,
+          category VARCHAR(100) NOT NULL DEFAULT 'Lainnya',
+          file_name VARCHAR(255) NOT NULL,
+          file_path TEXT NOT NULL,
+          storage_bucket VARCHAR(100) DEFAULT 'project-documents',
+          file_size INT NOT NULL DEFAULT 0,
+          mime_type VARCHAR(100) NOT NULL DEFAULT 'application/pdf',
+          uploaded_by VARCHAR(150),
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+
         -- Performance Indexes for Hot Queries & Cross-Module Synchronization
+        CREATE INDEX IF NOT EXISTS idx_project_documents_proj_created ON project_documents(project_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_attendance_project_date ON attendance(project_id, date DESC);
         CREATE INDEX IF NOT EXISTS idx_attendance_employee_date ON attendance(employee_id, date DESC);
         CREATE INDEX IF NOT EXISTS idx_overtime_project_date ON overtime_records(project_id, date DESC);
@@ -2125,6 +2141,16 @@ export const pgService = {
     const budgetRemaining = budget - totalExpenses;
     const realizationPercentage = budget > 0 ? Number(((totalExpenses / budget) * 100).toFixed(2)) : 0;
 
+    let totalDocuments = 0;
+    try {
+      await ensureAllSchemasOnce();
+      const docRes = await query(
+        `SELECT COUNT(*) as total FROM project_documents WHERE project_id = $1`,
+        [projectId]
+      );
+      totalDocuments = Number(docRes.rows[0]?.total || 0);
+    } catch {}
+
     return {
       totalAssignedEmployees,
       presentToday,
@@ -2133,6 +2159,7 @@ export const pgService = {
       totalKasbon,
       totalTransportationCost,
       totalOperationalCost,
+      totalDocuments,
       budget,
       budgetRemaining,
       realizationPercentage,
@@ -4759,5 +4786,179 @@ export const pgService = {
 
   async deleteUser(id: string): Promise<void> {
     await query('DELETE FROM app_users WHERE id = $1', [id]);
+  },
+
+  // 11. Project Documents (Module G: Dokumen Proyek - PDF)
+  async getProjectDocuments(projectId: string): Promise<ProjectDocument[]> {
+    await ensureAllSchemasOnce();
+    const res = await query(
+      `SELECT * FROM project_documents WHERE project_id = $1 ORDER BY created_at DESC`,
+      [projectId]
+    );
+    return res.rows.map((r) => ({
+      id: r.id,
+      projectId: r.project_id,
+      category: r.category || 'Lainnya',
+      fileName: r.file_name,
+      filePath: r.file_path,
+      storageBucket: r.storage_bucket || 'project-documents',
+      fileSize: Number(r.file_size || 0),
+      mimeType: r.mime_type || 'application/pdf',
+      uploadedBy: r.uploaded_by || '',
+      createdAt: r.created_at
+        ? typeof r.created_at === 'string'
+          ? r.created_at
+          : r.created_at.toISOString()
+        : new Date().toISOString(),
+      updatedAt: r.updated_at
+        ? typeof r.updated_at === 'string'
+          ? r.updated_at
+          : r.updated_at.toISOString()
+        : undefined,
+      viewUrl: `/api/projects/documents/${r.id}/view`,
+    }));
+  },
+
+  async getProjectDocumentById(docId: string): Promise<ProjectDocument | null> {
+    await ensureAllSchemasOnce();
+    const res = await query(`SELECT * FROM project_documents WHERE id = $1`, [docId]);
+    if (!res.rows.length) return null;
+    const r = res.rows[0];
+    return {
+      id: r.id,
+      projectId: r.project_id,
+      category: r.category || 'Lainnya',
+      fileName: r.file_name,
+      filePath: r.file_path,
+      storageBucket: r.storage_bucket || 'project-documents',
+      fileSize: Number(r.file_size || 0),
+      mimeType: r.mime_type || 'application/pdf',
+      uploadedBy: r.uploaded_by || '',
+      createdAt: r.created_at
+        ? typeof r.created_at === 'string'
+          ? r.created_at
+          : r.created_at.toISOString()
+        : new Date().toISOString(),
+      updatedAt: r.updated_at
+        ? typeof r.updated_at === 'string'
+          ? r.updated_at
+          : r.updated_at.toISOString()
+        : undefined,
+      viewUrl: `/api/projects/documents/${r.id}/view`,
+    };
+  },
+
+  async createProjectDocument(data: {
+    id: string;
+    projectId: string;
+    category: string;
+    fileName: string;
+    filePath: string;
+    storageBucket?: string;
+    fileSize: number;
+    mimeType?: string;
+    uploadedBy?: string;
+  }): Promise<ProjectDocument> {
+    await ensureAllSchemasOnce();
+    const res = await query(
+      `INSERT INTO project_documents (id, project_id, category, file_name, file_path, storage_bucket, file_size, mime_type, uploaded_by, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+       RETURNING *`,
+      [
+        data.id,
+        data.projectId,
+        data.category || 'Lainnya',
+        data.fileName,
+        data.filePath,
+        data.storageBucket || 'project-documents',
+        Math.max(0, Math.round(Number(data.fileSize) || 0)),
+        data.mimeType || 'application/pdf',
+        data.uploadedBy || 'Administrator',
+      ]
+    );
+    const r = res.rows[0];
+    return {
+      id: r.id,
+      projectId: r.project_id,
+      category: r.category,
+      fileName: r.file_name,
+      filePath: r.file_path,
+      storageBucket: r.storage_bucket,
+      fileSize: Number(r.file_size || 0),
+      mimeType: r.mime_type || 'application/pdf',
+      uploadedBy: r.uploaded_by || '',
+      createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+      updatedAt: r.updated_at instanceof Date ? r.updated_at.toISOString() : String(r.updated_at),
+      viewUrl: `/api/projects/documents/${r.id}/view`,
+    };
+  },
+
+  async updateProjectDocument(
+    docId: string,
+    data: {
+      category?: string;
+      fileName?: string;
+      filePath?: string;
+      storageBucket?: string;
+      fileSize?: number;
+      mimeType?: string;
+    }
+  ): Promise<{ updated: ProjectDocument; oldFilePath?: string; oldStorageBucket?: string }> {
+    await ensureAllSchemasOnce();
+    const existing = await this.getProjectDocumentById(docId);
+    if (!existing) throw new Error('Dokumen tidak ditemukan.');
+
+    const replacedFile = Boolean(data.filePath && data.filePath !== existing.filePath);
+    const nextCategory = data.category ?? existing.category;
+    const nextFileName = data.fileName ?? existing.fileName;
+    const nextFilePath = data.filePath ?? existing.filePath;
+    const nextBucket = data.storageBucket ?? existing.storageBucket ?? 'project-documents';
+    const nextSize = data.fileSize !== undefined ? Math.max(0, Math.round(Number(data.fileSize))) : existing.fileSize;
+    const nextMime = data.mimeType ?? existing.mimeType ?? 'application/pdf';
+
+    const res = await query(
+      `UPDATE project_documents
+       SET category = $1, file_name = $2, file_path = $3, storage_bucket = $4, file_size = $5, mime_type = $6, updated_at = NOW()
+       WHERE id = $7
+       RETURNING *`,
+      [nextCategory, nextFileName, nextFilePath, nextBucket, nextSize, nextMime, docId]
+    );
+    const r = res.rows[0];
+    const updated: ProjectDocument = {
+      id: r.id,
+      projectId: r.project_id,
+      category: r.category,
+      fileName: r.file_name,
+      filePath: r.file_path,
+      storageBucket: r.storage_bucket,
+      fileSize: Number(r.file_size || 0),
+      mimeType: r.mime_type || 'application/pdf',
+      uploadedBy: r.uploaded_by || '',
+      createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+      updatedAt: r.updated_at instanceof Date ? r.updated_at.toISOString() : String(r.updated_at),
+      viewUrl: `/api/projects/documents/${r.id}/view`,
+    };
+
+    return {
+      updated,
+      oldFilePath: replacedFile ? existing.filePath : undefined,
+      oldStorageBucket: replacedFile ? existing.storageBucket : undefined,
+    };
+  },
+
+  async deleteProjectDocument(docId: string): Promise<{ deleted: ProjectDocument }> {
+    await ensureAllSchemasOnce();
+    const existing = await this.getProjectDocumentById(docId);
+    if (!existing) throw new Error('Dokumen tidak ditemukan.');
+
+    await query(`DELETE FROM project_documents WHERE id = $1`, [docId]);
+
+    try {
+      await deleteDocumentFromStorage(existing.filePath, existing.storageBucket);
+    } catch (err) {
+      console.warn('Notice deleting physical PDF file from storage:', err);
+    }
+
+    return { deleted: existing };
   },
 };

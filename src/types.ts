@@ -269,7 +269,7 @@ export interface AuditLog {
   userName: string;
   userRole: 'admin' | 'owner' | 'Administrator' | 'Petugas';
   action: string;
-  module: 'Karyawan' | 'Absensi' | 'Lembur' | 'Kasbon' | 'Gaji' | 'Operasional' | 'Pengaturan' | 'Sistem' | 'Proyek' | 'Pengguna';
+  module: 'Karyawan' | 'Absensi' | 'Lembur' | 'Kasbon' | 'Gaji' | 'Operasional' | 'Pengaturan' | 'Sistem' | 'Proyek' | 'Pengguna' | 'Dokumen';
   details: string;
 }
 
@@ -357,6 +357,7 @@ export interface ProjectOverviewStats {
   totalKasbon: number;
   totalTransportationCost: number;
   totalOperationalCost: number;
+  totalDocuments?: number;
   budget: number;
   budgetRemaining: number;
   realizationPercentage: number;
@@ -366,5 +367,29 @@ export interface ProjectOverviewStats {
   totalOvertimeEmployees?: number;
   totalTransportCost?: number;
   remainingBudget?: number;
+}
+
+export type ProjectDocumentCategory =
+  | 'SPK'
+  | 'MoU / Kontrak'
+  | 'Faktur / Invoice'
+  | 'Surat Jalan'
+  | 'Berita Acara (BAST)'
+  | 'Lainnya';
+
+export interface ProjectDocument {
+  id: string;
+  projectId: string;
+  category: ProjectDocumentCategory | string;
+  fileName: string;
+  filePath: string;
+  storageBucket?: string;
+  fileSize: number;
+  mimeType: string;
+  uploadedBy?: string;
+  createdAt: string;
+  updatedAt?: string;
+  viewUrl?: string;
+  signedUrl?: string;
 }
 

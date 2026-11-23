@@ -47,6 +47,7 @@ import {
   Attendance,
   OvertimeRecord,
   KasbonRecord,
+  ProjectDocument,
 } from '../types.js';
 import { api } from '../lib/api.js';
 import {
@@ -72,6 +73,7 @@ import { useAuth } from '../context/AuthContext.js';
 import { useCompany } from '../context/CompanyContext.js';
 import { OfficialKopSurat } from './OfficialKopSurat.js';
 import { ProjectOverviewHome } from './ProjectOverviewHome.js';
+import { ProjectDocumentsModule } from './ProjectDocumentsModule.js';
 
 interface ProjectOverviewDashboardProps {
   project: Project;
@@ -87,6 +89,7 @@ type SubModule =
   | 'kasbon'
   | 'transport'
   | 'operasional'
+  | 'dokumen'
   | 'laporan';
 
 export type ReportSubmenuId = 'h1' | 'h2' | 'h3' | 'h4' | 'h5';
@@ -167,6 +170,8 @@ export const ProjectOverviewDashboard: React.FC<ProjectOverviewDashboardProps> =
   const [attendanceList, setAttendanceList] = useState<Attendance[]>([]);
   const [overtimeList, setOvertimeList] = useState<OvertimeRecord[]>([]);
   const [kasbonList, setKasbonList] = useState<KasbonRecord[]>([]);
+  const [documentsList, setDocumentsList] = useState<ProjectDocument[]>([]);
+  const [openDocumentUploadSignal, setOpenDocumentUploadSignal] = useState(0);
   const [recapData, setRecapData] = useState<any>(null);
   const [loadingModuleData, setLoadingModuleData] = useState(false);
 
@@ -523,6 +528,9 @@ export const ProjectOverviewDashboard: React.FC<ProjectOverviewDashboardProps> =
         ]);
         setKasbonList(kbs);
         setAssignments(asgs);
+      } else if (mod === 'dokumen') {
+        const docs = await api.getProjectDocuments(project.id);
+        setDocumentsList(docs);
       } else if (mod === 'laporan') {
         const s = appliedStartDate && appliedEndDate ? appliedStartDate : undefined;
         const e = appliedStartDate && appliedEndDate ? appliedEndDate : undefined;
@@ -1358,6 +1366,7 @@ export const ProjectOverviewDashboard: React.FC<ProjectOverviewDashboardProps> =
                 {activeModule === 'kasbon' && 'D. Kasbon Karyawan'}
                 {activeModule === 'transport' && 'E. Biaya Transportasi Proyek'}
                 {activeModule === 'operasional' && 'F. Pengeluaran Operasional Lapangan'}
+                {activeModule === 'dokumen' && 'G. Dokumen & Surat Proyek'}
                 {activeModule === 'laporan' && 'H. Laporan & Rekapitulasi Komprehensif Proyek'}
               </span>
             )}
@@ -1452,6 +1461,17 @@ export const ProjectOverviewDashboard: React.FC<ProjectOverviewDashboardProps> =
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>{activeModule === 'transport' ? 'Catat Biaya Transport' : 'Catat Pengeluaran Lapangan'}</span>
+              </button>
+            )}
+
+            {isAdmin && activeModule === 'dokumen' && (
+              <button
+                type="button"
+                onClick={() => setOpenDocumentUploadSignal((n) => n + 1)}
+                className="bg-[#2563EB] hover:bg-[#1D4ED8] text-white px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Unggah PDF</span>
               </button>
             )}
           </div>
@@ -3585,6 +3605,19 @@ export const ProjectOverviewDashboard: React.FC<ProjectOverviewDashboardProps> =
             </div>
           </div>
         </div>
+      )}
+
+      {/* SUB-MODULE VIEW G: DOKUMEN & SURAT PROYEK (PDF) */}
+      {activeModule === 'dokumen' && (
+        <ProjectDocumentsModule
+          project={project}
+          documents={documentsList}
+          loading={loadingModuleData}
+          onRefresh={() => fetchModuleData('dokumen')}
+          onStatsRefresh={fetchStats}
+          showToast={showToast}
+          externalOpenUploadSignal={openDocumentUploadSignal}
+        />
       )}
 
       {/* SUB-MODULE VIEW H: LAPORAN & REKAPITULASI KOMPREHENSIF PROYEK (H1 - H5) */}

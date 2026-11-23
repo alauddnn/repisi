@@ -17,9 +17,10 @@ import {
   CompanySettings,
   AppUser,
   Project,
+  ProjectDocument,
 } from './db.js';
 
-import { isPostgresConfigured, query as pgQuery } from './postgres.js';
+import { isPostgresConfigured, query as pgQuery, insertAuditLog } from './postgres.js';
 import { pgService, calcBasicPayByStatus, resolveOvertimeDecimalHours, calcOvertimePayExact, isDriverRole } from './pgService.js';
 import { verifyTurnstileToken, consumeTurnstileTicket } from './turnstile.js';
 import {
@@ -31,6 +32,13 @@ import {
   isSupabaseStorageAvailable,
   getBackendSupabaseUrl,
   EXPENSE_BUCKET_NAME,
+  MAX_DOCUMENT_FILE_SIZE,
+  validatePdfBuffer,
+  createDocumentSignedUpload,
+  uploadDocumentToStorage,
+  getDocumentSignedUrl,
+  downloadDocumentBuffer,
+  deleteDocumentFromStorage,
 } from './supabaseStorage.js';
 
 export const router = express.Router();
@@ -1014,6 +1022,7 @@ router.get('/projects/:id/stats', async (req: Request, res: Response) => {
   const proj = db.projects?.find((p) => p.id === id);
   if (!proj) return res.status(404).json({ error: 'Proyek tidak ditemukan' });
   const budget = proj.budget || 0;
+  const totalDocuments = (db.projectDocuments || []).filter((d) => d.projectId === id).length;
   return res.json({
     totalAssignedEmployees: db.employees.length,
     presentToday: 0,
@@ -1022,6 +1031,7 @@ router.get('/projects/:id/stats', async (req: Request, res: Response) => {
     totalKasbon: 0,
     totalTransportationCost: 0,
     totalOperationalCost: 0,
+    totalDocuments,
     budget,
     budgetRemaining: budget,
     realizationPercentage: 0,
@@ -1758,6 +1768,411 @@ router.get('/projects/expenses/attachments/:id/view', async (req: Request, res: 
   }
 
   return res.status(404).json({ error: 'File gambar fisik tidak ditemukan pada penyimpanan.' });
+});
+
+// ============================================================================
+// MODULE G: DOKUMEN & SURAT PROYEK (PDF) - SPK, MoU, Faktur, dll.
+// ============================================================================
+const ALLOWED_DOCUMENT_CATEGORIES = [
+  'SPK',
+  'MoU / Kontrak',
+  'Faktur / Invoice',
+  'Surat Jalan',
+  'Berita Acara (BAST)',
+  'Lainnya',
+];
+
+// List documents for a project (Admin & Owner)
+router.get('/projects/:id/documents', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  if (isPostgresConfigured) {
+    try {
+      const docs = await pgService.getProjectDocuments(id);
+      return res.json(docs);
+    } catch (err: any) {
+      return res.status(500).json({ error: 'Gagal mengambil daftar dokumen proyek: ' + err.message });
+    }
+  }
+  const db = dbManager.getDb();
+  const docs = (db.projectDocuments || [])
+    .filter((d) => d.projectId === id)
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+    .map((d) => ({ ...d, viewUrl: `/api/projects/documents/${d.id}/view` }));
+  return res.json(docs);
+});
+
+// Generate Signed Upload URL for direct-to-Supabase PDF upload (bypasses Vercel 4.5MB limit, up to 15MB)
+router.post('/projects/:id/documents/upload-url', async (req: Request, res: Response) => {
+  const user = getUserFromReq(req);
+  if (user.role !== 'admin') {
+    return res.status(403).json({ error: 'Akses ditolak: Hanya Administrator yang dapat mengunggah dokumen proyek.' });
+  }
+
+  const { id } = req.params;
+  const { fileName, fileSize, mimeType } = req.body || {};
+
+  if (!fileName || typeof fileName !== 'string' || !fileName.toLowerCase().endsWith('.pdf')) {
+    return res.status(400).json({ error: 'Format file harus PDF (.pdf).' });
+  }
+  if (mimeType && typeof mimeType === 'string' && !mimeType.toLowerCase().includes('pdf') && mimeType !== 'application/octet-stream') {
+    return res.status(400).json({ error: 'Tipe MIME file harus application/pdf.' });
+  }
+  const sizeNum = Number(fileSize || 0);
+  if (sizeNum <= 0) {
+    return res.status(400).json({ error: 'File PDF kosong atau ukuran tidak valid.' });
+  }
+  if (sizeNum > MAX_DOCUMENT_FILE_SIZE) {
+    return res.status(400).json({ error: 'Ukuran file PDF melebihi batas maksimal 15 MB.' });
+  }
+
+  const signedUpload = await createDocumentSignedUpload(id, fileName);
+  if (signedUpload) {
+    return res.json({
+      mode: 'signed_url',
+      signedUrl: signedUpload.signedUrl,
+      token: signedUpload.token,
+      path: signedUpload.path,
+      bucket: signedUpload.bucket,
+    });
+  }
+
+  return res.json({
+    mode: 'server_fallback',
+  });
+});
+
+// Create Project Document metadata (either after Signed URL upload OR direct base64 fallback upload)
+router.post('/projects/:id/documents', async (req: Request, res: Response) => {
+  const user = getUserFromReq(req);
+  if (user.role !== 'admin') {
+    return res.status(403).json({ error: 'Akses ditolak: Hanya Administrator yang dapat mengunggah dokumen proyek.' });
+  }
+
+  const { id: projectId } = req.params;
+  const { category, fileName, filePath, storageBucket, fileSize, mimeType, dataBase64 } = req.body || {};
+
+  if (!fileName || typeof fileName !== 'string' || !fileName.toLowerCase().endsWith('.pdf')) {
+    return res.status(400).json({ error: 'Nama file wajib berakhiran .pdf' });
+  }
+
+  const safeCategory = ALLOWED_DOCUMENT_CATEGORIES.includes(category) ? category : 'Lainnya';
+  let resolvedPath = typeof filePath === 'string' ? filePath.trim() : '';
+  let resolvedBucket = typeof storageBucket === 'string' && storageBucket.trim() ? storageBucket.trim() : 'project-documents';
+  let resolvedSize = Math.max(0, Math.round(Number(fileSize) || 0));
+  let resolvedMime = 'application/pdf';
+
+  // Fallback upload path when dataBase64 is supplied
+  if (!resolvedPath && dataBase64 && typeof dataBase64 === 'string') {
+    try {
+      const cleanB64 = dataBase64.includes(';base64,') ? dataBase64.split(';base64,')[1] : dataBase64;
+      const buffer = Buffer.from(cleanB64, 'base64');
+      const validation = validatePdfBuffer(buffer, fileName, mimeType);
+      if (!validation.valid) {
+        return res.status(400).json({ error: validation.error || 'File PDF tidak valid.' });
+      }
+      const uploadRes = await uploadDocumentToStorage(buffer, fileName, projectId);
+      resolvedPath = uploadRes.filePath;
+      resolvedBucket = uploadRes.storageBucket;
+      resolvedSize = buffer.length;
+      resolvedMime = validation.mimeType;
+    } catch (err: any) {
+      return res.status(400).json({ error: 'Gagal memproses file PDF: ' + (err?.message || err) });
+    }
+  }
+
+  if (!resolvedPath) {
+    return res.status(400).json({ error: 'File PDF wajib diunggah terlebih dahulu.' });
+  }
+
+  const docId = `DOC-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
+  if (isPostgresConfigured) {
+    try {
+      const created = await pgService.createProjectDocument({
+        id: docId,
+        projectId,
+        category: safeCategory,
+        fileName: fileName.trim(),
+        filePath: resolvedPath,
+        storageBucket: resolvedBucket,
+        fileSize: resolvedSize,
+        mimeType: resolvedMime,
+        uploadedBy: user.name,
+      });
+      await insertAuditLog(
+        user.name,
+        user.role,
+        'Unggah Dokumen PDF',
+        'Dokumen',
+        `Mengunggah dokumen ${safeCategory} "${created.fileName}" pada proyek ${projectId}`
+      );
+      return res.status(201).json(created);
+    } catch (err: any) {
+      return res.status(500).json({ error: 'Gagal menyimpan data dokumen proyek: ' + err.message });
+    }
+  }
+
+  const now = new Date().toISOString();
+  const createdDoc: ProjectDocument = {
+    id: docId,
+    projectId,
+    category: safeCategory,
+    fileName: fileName.trim(),
+    filePath: resolvedPath,
+    storageBucket: resolvedBucket,
+    fileSize: resolvedSize,
+    mimeType: resolvedMime,
+    uploadedBy: user.name,
+    createdAt: now,
+    updatedAt: now,
+    viewUrl: `/api/projects/documents/${docId}/view`,
+  };
+  dbManager.mutate((db) => {
+    if (!db.projectDocuments) db.projectDocuments = [];
+    db.projectDocuments.unshift(createdDoc);
+  });
+  dbManager.addAuditLog(
+    user.name,
+    user.role,
+    'Unggah Dokumen PDF',
+    'Dokumen',
+    `Mengunggah dokumen ${safeCategory} "${createdDoc.fileName}" pada proyek ${projectId}`
+  );
+  return res.status(201).json(createdDoc);
+});
+
+// Update Project Document (Edit category / filename / optionally replace PDF file)
+router.put('/projects/:id/documents/:docId', async (req: Request, res: Response) => {
+  const user = getUserFromReq(req);
+  if (user.role !== 'admin') {
+    return res.status(403).json({ error: 'Akses ditolak: Hanya Administrator yang dapat mengubah dokumen proyek.' });
+  }
+
+  const { id: projectId, docId } = req.params;
+  const { category, fileName, filePath, storageBucket, fileSize, mimeType, dataBase64 } = req.body || {};
+
+  const safeCategory = category && ALLOWED_DOCUMENT_CATEGORIES.includes(category) ? category : undefined;
+  let safeFileName = typeof fileName === 'string' && fileName.trim() ? fileName.trim() : undefined;
+  if (safeFileName && !safeFileName.toLowerCase().endsWith('.pdf')) {
+    safeFileName = `${safeFileName}.pdf`;
+  }
+
+  let nextFilePath = typeof filePath === 'string' && filePath.trim() ? filePath.trim() : undefined;
+  let nextBucket = typeof storageBucket === 'string' && storageBucket.trim() ? storageBucket.trim() : undefined;
+  let nextSize = fileSize !== undefined ? Math.max(0, Math.round(Number(fileSize) || 0)) : undefined;
+  let nextMime = nextFilePath ? 'application/pdf' : undefined;
+
+  if (!nextFilePath && dataBase64 && typeof dataBase64 === 'string') {
+    try {
+      const targetName = safeFileName || 'dokumen.pdf';
+      const cleanB64 = dataBase64.includes(';base64,') ? dataBase64.split(';base64,')[1] : dataBase64;
+      const buffer = Buffer.from(cleanB64, 'base64');
+      const validation = validatePdfBuffer(buffer, targetName, mimeType);
+      if (!validation.valid) {
+        return res.status(400).json({ error: validation.error || 'File PDF pengganti tidak valid.' });
+      }
+      const uploadRes = await uploadDocumentToStorage(buffer, targetName, projectId);
+      nextFilePath = uploadRes.filePath;
+      nextBucket = uploadRes.storageBucket;
+      nextSize = buffer.length;
+      nextMime = validation.mimeType;
+    } catch (err: any) {
+      return res.status(400).json({ error: 'Gagal memproses file PDF pengganti: ' + (err?.message || err) });
+    }
+  }
+
+  if (isPostgresConfigured) {
+    try {
+      const { updated, oldFilePath, oldStorageBucket } = await pgService.updateProjectDocument(docId, {
+        category: safeCategory,
+        fileName: safeFileName,
+        filePath: nextFilePath,
+        storageBucket: nextBucket,
+        fileSize: nextSize,
+        mimeType: nextMime,
+      });
+      if (oldFilePath) {
+        try {
+          await deleteDocumentFromStorage(oldFilePath, oldStorageBucket);
+        } catch {}
+      }
+      await insertAuditLog(
+        user.name,
+        user.role,
+        'Ubah Dokumen PDF',
+        'Dokumen',
+        `Memperbarui dokumen "${updated.fileName}" (${updated.category}) pada proyek ${projectId}`
+      );
+      return res.json(updated);
+    } catch (err: any) {
+      return res.status(err.message?.includes('tidak ditemukan') ? 404 : 500).json({
+        error: err.message || 'Gagal memperbarui dokumen proyek',
+      });
+    }
+  }
+
+  let updatedLocal: ProjectDocument | null = null;
+  let oldLocalPath: string | undefined;
+  let oldLocalBucket: string | undefined;
+  dbManager.mutate((db) => {
+    const idx = (db.projectDocuments || []).findIndex((d) => d.id === docId && d.projectId === projectId);
+    if (idx === -1) return;
+    const prev = db.projectDocuments![idx];
+    if (nextFilePath && nextFilePath !== prev.filePath) {
+      oldLocalPath = prev.filePath;
+      oldLocalBucket = prev.storageBucket;
+    }
+    updatedLocal = {
+      ...prev,
+      category: safeCategory ?? prev.category,
+      fileName: safeFileName ?? prev.fileName,
+      filePath: nextFilePath ?? prev.filePath,
+      storageBucket: nextBucket ?? prev.storageBucket,
+      fileSize: nextSize ?? prev.fileSize,
+      mimeType: nextMime ?? prev.mimeType,
+      updatedAt: new Date().toISOString(),
+      viewUrl: `/api/projects/documents/${prev.id}/view`,
+    };
+    db.projectDocuments![idx] = updatedLocal;
+  });
+
+  if (!updatedLocal) {
+    return res.status(404).json({ error: 'Dokumen tidak ditemukan.' });
+  }
+  if (oldLocalPath) {
+    try {
+      await deleteDocumentFromStorage(oldLocalPath, oldLocalBucket);
+    } catch {}
+  }
+  dbManager.addAuditLog(
+    user.name,
+    user.role,
+    'Ubah Dokumen PDF',
+    'Dokumen',
+    `Memperbarui dokumen "${(updatedLocal as ProjectDocument).fileName}" pada proyek ${projectId}`
+  );
+  return res.json(updatedLocal);
+});
+
+// Delete Project Document
+router.delete('/projects/:id/documents/:docId', async (req: Request, res: Response) => {
+  const user = getUserFromReq(req);
+  if (user.role !== 'admin') {
+    return res.status(403).json({ error: 'Akses ditolak: Hanya Administrator yang dapat menghapus dokumen proyek.' });
+  }
+
+  const { id: projectId, docId } = req.params;
+
+  if (isPostgresConfigured) {
+    try {
+      const { deleted } = await pgService.deleteProjectDocument(docId);
+      await insertAuditLog(
+        user.name,
+        user.role,
+        'Hapus Dokumen PDF',
+        'Dokumen',
+        `Menghapus dokumen ${deleted.category} "${deleted.fileName}" pada proyek ${projectId}`
+      );
+      return res.json({ message: `Dokumen "${deleted.fileName}" berhasil dihapus.` });
+    } catch (err: any) {
+      return res.status(err.message?.includes('tidak ditemukan') ? 404 : 500).json({
+        error: err.message || 'Gagal menghapus dokumen proyek',
+      });
+    }
+  }
+
+  let deletedDoc: ProjectDocument | null = null;
+  dbManager.mutate((db) => {
+    const list = db.projectDocuments || [];
+    const idx = list.findIndex((d) => d.id === docId && d.projectId === projectId);
+    if (idx !== -1) {
+      deletedDoc = list[idx];
+      list.splice(idx, 1);
+    }
+  });
+  if (!deletedDoc) {
+    return res.status(404).json({ error: 'Dokumen tidak ditemukan.' });
+  }
+  try {
+    await deleteDocumentFromStorage((deletedDoc as ProjectDocument).filePath, (deletedDoc as ProjectDocument).storageBucket);
+  } catch {}
+  dbManager.addAuditLog(
+    user.name,
+    user.role,
+    'Hapus Dokumen PDF',
+    'Dokumen',
+    `Menghapus dokumen "${(deletedDoc as ProjectDocument).fileName}" pada proyek ${projectId}`
+  );
+  return res.json({ message: `Dokumen "${(deletedDoc as ProjectDocument).fileName}" berhasil dihapus.` });
+});
+
+// Stream or Download Project Document PDF (Private Auth Check - Admin & Owner)
+router.get('/projects/documents/:docId/view', async (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+  if (!user) {
+    return res.status(401).json({
+      error: 'Akses privat: Anda harus masuk (login) sebagai Administrator atau Owner untuk melihat dokumen proyek.',
+    });
+  }
+
+  const { docId } = req.params;
+  let doc: ProjectDocument | null = null;
+  if (isPostgresConfigured) {
+    doc = await pgService.getProjectDocumentById(docId);
+  } else {
+    const db = dbManager.getDb();
+    doc = (db.projectDocuments || []).find((d) => d.id === docId) || null;
+  }
+
+  if (!doc) {
+    return res.status(404).json({ error: 'Dokumen tidak ditemukan.' });
+  }
+
+  const isDownload = req.query.download === 'true';
+  const fileData = await downloadDocumentBuffer(doc.filePath, doc.storageBucket);
+  if (fileData) {
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader(
+      'Content-Disposition',
+      `${isDownload ? 'attachment' : 'inline'}; filename="${encodeURIComponent(doc.fileName || fileData.fileName)}"`
+    );
+    return res.send(fileData.buffer);
+  }
+
+  const signedUrl = await getDocumentSignedUrl(doc.filePath, doc.storageBucket, 3600);
+  if (signedUrl) {
+    return res.redirect(302, signedUrl);
+  }
+
+  return res.status(404).json({ error: 'File fisik PDF tidak ditemukan pada penyimpanan.' });
+});
+
+// Optional fresh signed URL endpoint for direct PDF preview/download fallback
+router.get('/projects/documents/:docId/signed-url', async (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+  if (!user) {
+    return res.status(401).json({ error: 'Akses privat: Harap login terlebih dahulu.' });
+  }
+
+  const { docId } = req.params;
+  let doc: ProjectDocument | null = null;
+  if (isPostgresConfigured) {
+    doc = await pgService.getProjectDocumentById(docId);
+  } else {
+    const db = dbManager.getDb();
+    doc = (db.projectDocuments || []).find((d) => d.id === docId) || null;
+  }
+
+  if (!doc) {
+    return res.status(404).json({ error: 'Dokumen tidak ditemukan.' });
+  }
+
+  const signedUrl = await getDocumentSignedUrl(doc.filePath, doc.storageBucket, 3600);
+  return res.json({
+    signedUrl,
+    fileName: doc.fileName,
+  });
 });
 
 // Project Comprehensive Recap

@@ -14,6 +14,7 @@ import {
   ProjectAssignment,
   ProjectExpense,
   ProjectOverviewStats,
+  ProjectDocument,
 } from '../types.js';
 
 // Get current user session and auth headers
@@ -298,6 +299,158 @@ export const api = {
     if (endDate) params.endDate = endDate;
     const q = new URLSearchParams(params).toString();
     return request<any>(`/projects/${projectId}/recap${q ? `?${q}` : ''}`);
+  },
+
+  // Module G: Project Documents (PDF)
+  getProjectDocuments: (projectId: string) =>
+    request<ProjectDocument[]>(`/projects/${projectId}/documents`),
+
+  requestProjectDocumentUploadUrl: (
+    projectId: string,
+    data: { fileName: string; fileSize: number; mimeType: string }
+  ) =>
+    request<{
+      mode: 'signed_url' | 'server_fallback';
+      signedUrl?: string;
+      token?: string;
+      path?: string;
+      bucket?: string;
+    }>(`/projects/${projectId}/documents/upload-url`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  createProjectDocument: (
+    projectId: string,
+    data: {
+      category: string;
+      fileName: string;
+      filePath?: string;
+      storageBucket?: string;
+      fileSize: number;
+      mimeType: string;
+      dataBase64?: string;
+    }
+  ) =>
+    request<ProjectDocument>(`/projects/${projectId}/documents`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateProjectDocument: (
+    projectId: string,
+    docId: string,
+    data: {
+      category?: string;
+      fileName?: string;
+      filePath?: string;
+      storageBucket?: string;
+      fileSize?: number;
+      mimeType?: string;
+      dataBase64?: string;
+    }
+  ) =>
+    request<ProjectDocument>(`/projects/${projectId}/documents/${docId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteProjectDocument: (projectId: string, docId: string) =>
+    request<{ message: string }>(`/projects/${projectId}/documents/${docId}`, {
+      method: 'DELETE',
+    }),
+
+  getProjectDocumentSignedUrl: (docId: string) =>
+    request<{ signedUrl: string | null; fileName: string }>(`/projects/documents/${docId}/signed-url`),
+
+  uploadProjectDocumentFile: async (
+    projectId: string,
+    file: File
+  ): Promise<{
+    fileName: string;
+    fileSize: number;
+    mimeType: string;
+    filePath?: string;
+    storageBucket?: string;
+    dataBase64?: string;
+  }> => {
+    const MAX_PDF_BYTES = 15 * 1024 * 1024;
+    if (!file) throw new Error('File PDF belum dipilih.');
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      throw new Error('Format file harus PDF (.pdf).');
+    }
+    if (file.size <= 0) {
+      throw new Error('File PDF kosong atau rusak.');
+    }
+    if (file.size > MAX_PDF_BYTES) {
+      throw new Error('Ukuran file PDF melebihi batas maksimal 15 MB.');
+    }
+
+    // Verify %PDF- header client-side before uploading
+    const headerBuf = await file.slice(0, 1024).text();
+    if (!headerBuf.includes('%PDF-')) {
+      throw new Error('File yang dipilih bukan dokumen PDF yang valid.');
+    }
+
+    const prep = await request<{
+      mode: 'signed_url' | 'server_fallback';
+      signedUrl?: string;
+      token?: string;
+      path?: string;
+      bucket?: string;
+    }>(`/projects/${projectId}/documents/upload-url`, {
+      method: 'POST',
+      body: JSON.stringify({
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type || 'application/pdf',
+      }),
+    });
+
+    if (prep.mode === 'signed_url' && prep.signedUrl && prep.path) {
+      try {
+        const formData = new FormData();
+        formData.append('cacheControl', '3600');
+        formData.append('', file);
+
+        const uploadRes = await fetch(prep.signedUrl, {
+          method: 'PUT',
+          headers: {
+            'x-upsert': 'true',
+          },
+          body: formData,
+        });
+
+        if (uploadRes.ok) {
+          return {
+            fileName: file.name,
+            fileSize: file.size,
+            mimeType: 'application/pdf',
+            filePath: prep.path,
+            storageBucket: prep.bucket,
+          };
+        }
+        const errText = await uploadRes.text().catch(() => '');
+        console.warn('Direct Supabase signed upload failed, checking fallback:', uploadRes.status, errText);
+      } catch (err) {
+        console.warn('Direct Supabase signed upload network error, checking fallback:', err);
+      }
+    }
+
+    // Fallback to server base64 upload (best effort up to ~3.2MB on Vercel or 15MB locally)
+    const dataBase64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Gagal membaca file PDF.'));
+      reader.readAsDataURL(file);
+    });
+
+    return {
+      fileName: file.name,
+      fileSize: file.size,
+      mimeType: 'application/pdf',
+      dataBase64,
+    };
   },
 
   // Settings
