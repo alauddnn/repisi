@@ -637,9 +637,12 @@ export async function ensureAllSchemasOnce(): Promise<void> {
           file_size INT NOT NULL DEFAULT 0,
           mime_type VARCHAR(100) NOT NULL DEFAULT 'application/pdf',
           uploaded_by VARCHAR(150),
+          file_data BYTEA,
           created_at TIMESTAMPTZ DEFAULT NOW(),
           updated_at TIMESTAMPTZ DEFAULT NOW()
         );
+
+        ALTER TABLE project_documents ADD COLUMN IF NOT EXISTS file_data BYTEA;
 
         -- Performance Indexes for Hot Queries & Cross-Module Synchronization
         CREATE INDEX IF NOT EXISTS idx_project_documents_proj_created ON project_documents(project_id, created_at DESC);
@@ -4792,7 +4795,10 @@ export const pgService = {
   async getProjectDocuments(projectId: string): Promise<ProjectDocument[]> {
     await ensureAllSchemasOnce();
     const res = await query(
-      `SELECT * FROM project_documents WHERE project_id = $1 ORDER BY created_at DESC`,
+      `SELECT id, project_id, category, file_name, file_path, storage_bucket, file_size, mime_type, uploaded_by, created_at, updated_at
+       FROM project_documents
+       WHERE project_id = $1
+       ORDER BY created_at DESC`,
       [projectId]
     );
     return res.rows.map((r) => ({
@@ -4821,7 +4827,12 @@ export const pgService = {
 
   async getProjectDocumentById(docId: string): Promise<ProjectDocument | null> {
     await ensureAllSchemasOnce();
-    const res = await query(`SELECT * FROM project_documents WHERE id = $1`, [docId]);
+    const res = await query(
+      `SELECT id, project_id, category, file_name, file_path, storage_bucket, file_size, mime_type, uploaded_by, created_at, updated_at
+       FROM project_documents
+       WHERE id = $1`,
+      [docId]
+    );
     if (!res.rows.length) return null;
     const r = res.rows[0];
     return {
@@ -4848,6 +4859,14 @@ export const pgService = {
     };
   },
 
+  async getProjectDocumentFileData(docId: string): Promise<Buffer | null> {
+    await ensureAllSchemasOnce();
+    const res = await query(`SELECT file_data FROM project_documents WHERE id = $1`, [docId]);
+    if (!res.rows.length || !res.rows[0].file_data) return null;
+    const raw = res.rows[0].file_data;
+    return Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
+  },
+
   async createProjectDocument(data: {
     id: string;
     projectId: string;
@@ -4858,12 +4877,13 @@ export const pgService = {
     fileSize: number;
     mimeType?: string;
     uploadedBy?: string;
+    fileData?: Buffer | null;
   }): Promise<ProjectDocument> {
     await ensureAllSchemasOnce();
     const res = await query(
-      `INSERT INTO project_documents (id, project_id, category, file_name, file_path, storage_bucket, file_size, mime_type, uploaded_by, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
-       RETURNING *`,
+      `INSERT INTO project_documents (id, project_id, category, file_name, file_path, storage_bucket, file_size, mime_type, uploaded_by, file_data, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
+       RETURNING id, project_id, category, file_name, file_path, storage_bucket, file_size, mime_type, uploaded_by, created_at, updated_at`,
       [
         data.id,
         data.projectId,
@@ -4874,6 +4894,7 @@ export const pgService = {
         Math.max(0, Math.round(Number(data.fileSize) || 0)),
         data.mimeType || 'application/pdf',
         data.uploadedBy || 'Administrator',
+        data.fileData || null,
       ]
     );
     const r = res.rows[0];
@@ -4902,6 +4923,7 @@ export const pgService = {
       storageBucket?: string;
       fileSize?: number;
       mimeType?: string;
+      fileData?: Buffer | null;
     }
   ): Promise<{ updated: ProjectDocument; oldFilePath?: string; oldStorageBucket?: string }> {
     await ensureAllSchemasOnce();
@@ -4916,13 +4938,25 @@ export const pgService = {
     const nextSize = data.fileSize !== undefined ? Math.max(0, Math.round(Number(data.fileSize))) : existing.fileSize;
     const nextMime = data.mimeType ?? existing.mimeType ?? 'application/pdf';
 
-    const res = await query(
-      `UPDATE project_documents
-       SET category = $1, file_name = $2, file_path = $3, storage_bucket = $4, file_size = $5, mime_type = $6, updated_at = NOW()
-       WHERE id = $7
-       RETURNING *`,
-      [nextCategory, nextFileName, nextFilePath, nextBucket, nextSize, nextMime, docId]
-    );
+    // Update file_data only if new file was supplied (or replaced by external storage URL -> clear stale BYTEA)
+    const shouldUpdateBinary = data.fileData !== undefined || replacedFile;
+    const nextFileData = data.fileData !== undefined ? data.fileData : null;
+
+    const res = shouldUpdateBinary
+      ? await query(
+          `UPDATE project_documents
+           SET category = $1, file_name = $2, file_path = $3, storage_bucket = $4, file_size = $5, mime_type = $6, file_data = $7, updated_at = NOW()
+           WHERE id = $8
+           RETURNING id, project_id, category, file_name, file_path, storage_bucket, file_size, mime_type, uploaded_by, created_at, updated_at`,
+          [nextCategory, nextFileName, nextFilePath, nextBucket, nextSize, nextMime, nextFileData, docId]
+        )
+      : await query(
+          `UPDATE project_documents
+           SET category = $1, file_name = $2, file_path = $3, storage_bucket = $4, file_size = $5, mime_type = $6, updated_at = NOW()
+           WHERE id = $7
+           RETURNING id, project_id, category, file_name, file_path, storage_bucket, file_size, mime_type, uploaded_by, created_at, updated_at`,
+          [nextCategory, nextFileName, nextFilePath, nextBucket, nextSize, nextMime, docId]
+        );
     const r = res.rows[0];
     const updated: ProjectDocument = {
       id: r.id,

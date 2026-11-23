@@ -242,7 +242,6 @@ export const ProjectDocumentsModule: React.FC<ProjectDocumentsModuleProps> = ({
     } catch (err: any) {
       const msg = err?.message || 'Gagal menyimpan dokumen PDF.';
       setFileError(msg);
-      showToast('error', msg);
     } finally {
       setSubmitting(false);
     }
@@ -361,164 +360,288 @@ export const ProjectDocumentsModule: React.FC<ProjectDocumentsModuleProps> = ({
           </div>
         </div>
 
-        {/* Bounded List Table (Max ~10 visible rows, internal vertical scroll for 11+) */}
-        <div className="max-h-[620px] overflow-y-auto overscroll-contain overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <tbody className="divide-y divide-slate-200/75 text-slate-700">
-              {loading ? (
-                Array.from({ length: 4 }).map((_, idx) => (
-                  <tr key={`doc-skel-${idx}`}>
-                    <td className="py-4 px-6">
-                      <div className="flex items-center gap-3.5">
-                        <div className="w-10 h-10 rounded-full kms-skeleton shrink-0" />
-                        <div className="space-y-1.5">
-                          <div className="h-4 w-48 rounded kms-skeleton" />
-                          <div className="h-3 w-32 rounded kms-skeleton" />
+        {/* Bounded List Container (Max ~10 visible rows, internal vertical scroll for 11+) */}
+        <div className="max-h-[620px] overflow-y-auto overscroll-contain">
+          {/* Mobile Card View (< md) — avoids horizontal table overflow */}
+          <div className="md:hidden divide-y divide-slate-200/75">
+            {loading ? (
+              Array.from({ length: 4 }).map((_, idx) => (
+                <div key={`doc-mob-skel-${idx}`} className="p-4 space-y-2.5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full kms-skeleton shrink-0" />
+                    <div className="flex-1 space-y-1.5">
+                      <div className="h-4 w-40 rounded kms-skeleton" />
+                      <div className="h-3 w-28 rounded kms-skeleton" />
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : filteredDocuments.length === 0 ? (
+              <div className="py-12 px-4 text-center text-slate-500">
+                <FileText className="w-9 h-9 text-slate-300 mx-auto mb-2.5" />
+                <p className="font-semibold text-slate-800 text-xs">
+                  {documents.length === 0
+                    ? 'Belum ada surat atau dokumen PDF pada proyek ini.'
+                    : 'Tidak ada dokumen PDF yang sesuai dengan pencarian atau filter kategori.'}
+                </p>
+                {isAdmin && documents.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={openUploadModal}
+                    className="mt-4 inline-flex items-center gap-1.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white px-4 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Unggah PDF Pertama</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              filteredDocuments.map((doc) => {
+                const badgeStyle = CATEGORY_BADGE_STYLES[doc.category] || CATEGORY_BADGE_STYLES.Lainnya;
+                const downloadHref = getDocumentUrl(doc.id, true);
+                return (
+                  <div key={`mob-${doc.id}`} className="p-4 space-y-3 hover:bg-slate-50/70 transition-colors">
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center shrink-0 border border-rose-100 mt-0.5">
+                        <FileText className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPreviewLoading(true);
+                            setPreviewDoc(doc);
+                          }}
+                          className="text-xs font-semibold text-slate-900 hover:text-[#2563EB] text-left break-words w-full cursor-pointer"
+                        >
+                          {doc.fileName}
+                        </button>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium ${badgeStyle}`}>
+                            {doc.category}
+                          </span>
+                          <span className="font-mono text-[10px] text-slate-500 tabular-nums">
+                            {formatFileSize(doc.fileSize)}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            · {formatDateShort(doc.createdAt)}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-1">
+                          Oleh {doc.uploadedBy || 'Administrator'}
                         </div>
                       </div>
-                    </td>
-                    <td className="py-4 px-4"><div className="h-6 w-28 rounded-lg kms-skeleton" /></td>
-                    <td className="py-4 px-4"><div className="h-4 w-32 rounded kms-skeleton" /></td>
-                    <td className="py-4 px-6 text-right"><div className="h-8 w-36 rounded-lg kms-skeleton ml-auto" /></td>
-                  </tr>
-                ))
-              ) : filteredDocuments.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="py-14 text-center text-slate-500">
-                    <FileText className="w-9 h-9 text-slate-300 mx-auto mb-2.5" />
-                    <p className="font-semibold text-slate-800">
-                      {documents.length === 0
-                        ? 'Belum ada surat atau dokumen PDF pada proyek ini.'
-                        : 'Tidak ada dokumen PDF yang sesuai dengan pencarian atau filter kategori.'}
-                    </p>
-                    <p className="text-xs text-slate-500 mt-1">
-                      {documents.length === 0
-                        ? 'Unggah dokumen SPK, MoU / Kontrak, Faktur, Surat Jalan, atau Berita Acara dalam format PDF.'
-                        : 'Coba ubah kata kunci pencarian atau pilih "Semua Kategori".'}
-                    </p>
-                    {isAdmin && documents.length === 0 && (
-                      <button
-                        type="button"
-                        onClick={openUploadModal}
-                        className="mt-4 inline-flex items-center gap-1.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white px-4 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-                      >
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>Unggah PDF Pertama</span>
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ) : (
-                filteredDocuments.map((doc) => {
-                  const badgeStyle = CATEGORY_BADGE_STYLES[doc.category] || CATEGORY_BADGE_STYLES.Lainnya;
-                  const downloadHref = getDocumentUrl(doc.id, true);
+                    </div>
 
-                  return (
-                    <tr key={doc.id} className="hover:bg-slate-50/90 transition-colors">
-                      {/* Col 1: PDF Icon + File Name & Metadata */}
-                      <td className="py-3.5 px-6 whitespace-nowrap">
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPreviewLoading(true);
+                            setPreviewDoc(doc);
+                          }}
+                          className="px-2.5 py-1.5 bg-[#EFF5FF] hover:bg-[#DBEAFE] text-[#155EEF] border border-[#D0E2FF] rounded-lg text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Preview</span>
+                        </button>
+                        <a
+                          href={downloadHref}
+                          download={doc.fileName}
+                          className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-[11px] font-semibold inline-flex items-center gap-1"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Unduh</span>
+                        </a>
+                      </div>
+
+                      {isAdmin && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(doc)}
+                            className="p-1.5 text-slate-500 hover:text-[#2563EB] hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                            title="Edit Dokumen"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDocToDelete(doc)}
+                            className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            title="Hapus Dokumen"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Desktop / Tablet Table View (>= md) */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <tbody className="divide-y divide-slate-200/75 text-slate-700">
+                {loading ? (
+                  Array.from({ length: 4 }).map((_, idx) => (
+                    <tr key={`doc-skel-${idx}`}>
+                      <td className="py-4 px-6">
                         <div className="flex items-center gap-3.5">
-                          <div className="w-10 h-10 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center shrink-0 border border-rose-100">
-                            <FileText className="w-4 h-4" />
+                          <div className="w-10 h-10 rounded-full kms-skeleton shrink-0" />
+                          <div className="space-y-1.5">
+                            <div className="h-4 w-48 rounded kms-skeleton" />
+                            <div className="h-3 w-32 rounded kms-skeleton" />
                           </div>
-                          <div className="min-w-0 max-w-[260px] sm:max-w-sm">
+                        </div>
+                      </td>
+                      <td className="py-4 px-4"><div className="h-6 w-28 rounded-lg kms-skeleton" /></td>
+                      <td className="py-4 px-4"><div className="h-4 w-32 rounded kms-skeleton" /></td>
+                      <td className="py-4 px-6 text-right"><div className="h-8 w-36 rounded-lg kms-skeleton ml-auto" /></td>
+                    </tr>
+                  ))
+                ) : filteredDocuments.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-14 text-center text-slate-500">
+                      <FileText className="w-9 h-9 text-slate-300 mx-auto mb-2.5" />
+                      <p className="font-semibold text-slate-800">
+                        {documents.length === 0
+                          ? 'Belum ada surat atau dokumen PDF pada proyek ini.'
+                          : 'Tidak ada dokumen PDF yang sesuai dengan pencarian atau filter kategori.'}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        {documents.length === 0
+                          ? 'Unggah dokumen SPK, MoU / Kontrak, Faktur, Surat Jalan, atau Berita Acara dalam format PDF.'
+                          : 'Coba ubah kata kunci pencarian atau pilih "Semua Kategori".'}
+                      </p>
+                      {isAdmin && documents.length === 0 && (
+                        <button
+                          type="button"
+                          onClick={openUploadModal}
+                          className="mt-4 inline-flex items-center gap-1.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white px-4 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Unggah PDF Pertama</span>
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredDocuments.map((doc) => {
+                    const badgeStyle = CATEGORY_BADGE_STYLES[doc.category] || CATEGORY_BADGE_STYLES.Lainnya;
+                    const downloadHref = getDocumentUrl(doc.id, true);
+
+                    return (
+                      <tr key={doc.id} className="hover:bg-slate-50/90 transition-colors">
+                        {/* Col 1: PDF Icon + File Name & Metadata */}
+                        <td className="py-3.5 px-6 whitespace-nowrap">
+                          <div className="flex items-center gap-3.5">
+                            <div className="w-10 h-10 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center shrink-0 border border-rose-100">
+                              <FileText className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0 max-w-[260px] sm:max-w-sm">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPreviewLoading(true);
+                                  setPreviewDoc(doc);
+                                }}
+                                className="text-[13.5px] font-semibold text-slate-900 hover:text-[#2563EB] transition-colors leading-snug truncate block text-left w-full cursor-pointer"
+                                title={`Preview ${doc.fileName}`}
+                              >
+                                {doc.fileName}
+                              </button>
+                              <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5">
+                                <span className="font-mono text-[11px] text-rose-700 font-semibold">PDF</span>
+                                <span className="text-slate-300" aria-hidden="true">·</span>
+                                <span className="font-mono text-[11px] tabular-nums text-slate-500">
+                                  {formatFileSize(doc.fileSize)}
+                                </span>
+                                <span className="text-slate-300" aria-hidden="true">·</span>
+                                <span className="text-[11px] text-slate-400 tabular-nums">
+                                  {formatDateShort(doc.createdAt)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Col 2: Category Tag */}
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium ${badgeStyle}`}>
+                            {doc.category}
+                          </span>
+                        </td>
+
+                        {/* Col 3: Uploader & Upload Timestamp */}
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <div className="text-xs font-medium text-slate-700">
+                            {doc.uploadedBy || 'Administrator'}
+                          </div>
+                          <div className="text-[11px] text-slate-400 tabular-nums mt-0.5">
+                            Diunggah {formatDateShort(doc.createdAt)}
+                          </div>
+                        </td>
+
+                        {/* Col 4: Actions (Preview, Unduh, Admin: Edit & Hapus) */}
+                        <td className="py-3.5 px-6 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center justify-end gap-1.5">
                             <button
                               type="button"
                               onClick={() => {
                                 setPreviewLoading(true);
                                 setPreviewDoc(doc);
                               }}
-                              className="text-[13.5px] font-semibold text-slate-900 hover:text-[#2563EB] transition-colors leading-snug truncate block text-left w-full cursor-pointer"
-                              title={`Preview ${doc.fileName}`}
+                              className="px-2.5 py-1.5 bg-[#EFF5FF] hover:bg-[#DBEAFE] text-[#155EEF] border border-[#D0E2FF] rounded-lg text-[11px] font-semibold transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                              title="Preview PDF"
                             >
-                              {doc.fileName}
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>Preview</span>
                             </button>
-                            <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5">
-                              <span className="font-mono text-[11px] text-rose-700 font-semibold">PDF</span>
-                              <span className="text-slate-300" aria-hidden="true">·</span>
-                              <span className="font-mono text-[11px] tabular-nums text-slate-500">
-                                {formatFileSize(doc.fileSize)}
-                              </span>
-                              <span className="text-slate-300" aria-hidden="true">·</span>
-                              <span className="text-[11px] text-slate-400 tabular-nums">
-                                {formatDateShort(doc.createdAt)}
-                              </span>
-                            </div>
+
+                            <a
+                              href={downloadHref}
+                              download={doc.fileName}
+                              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-[11px] font-semibold transition-colors inline-flex items-center gap-1.5"
+                              title="Unduh File PDF"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">Unduh</span>
+                            </a>
+
+                            {isAdmin && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => openEditModal(doc)}
+                                  className="p-1.5 text-slate-400 hover:text-[#2563EB] hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Edit Kategori / Ganti File PDF"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDocToDelete(doc)}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Hapus Dokumen"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
                           </div>
-                        </div>
-                      </td>
-
-                      {/* Col 2: Category Tag */}
-                      <td className="py-3.5 px-4 whitespace-nowrap">
-                        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium ${badgeStyle}`}>
-                          {doc.category}
-                        </span>
-                      </td>
-
-                      {/* Col 3: Uploader & Upload Timestamp */}
-                      <td className="py-3.5 px-4 whitespace-nowrap">
-                        <div className="text-xs font-medium text-slate-700">
-                          {doc.uploadedBy || 'Administrator'}
-                        </div>
-                        <div className="text-[11px] text-slate-400 tabular-nums mt-0.5">
-                          Diunggah {formatDateShort(doc.createdAt)}
-                        </div>
-                      </td>
-
-                      {/* Col 4: Actions (Preview, Unduh, Admin: Edit & Hapus) */}
-                      <td className="py-3.5 px-6 text-right whitespace-nowrap">
-                        <div className="inline-flex items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPreviewLoading(true);
-                              setPreviewDoc(doc);
-                            }}
-                            className="px-2.5 py-1.5 bg-[#EFF5FF] hover:bg-[#DBEAFE] text-[#155EEF] border border-[#D0E2FF] rounded-lg text-[11px] font-semibold transition-colors inline-flex items-center gap-1.5 cursor-pointer"
-                            title="Preview PDF"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            <span>Preview</span>
-                          </button>
-
-                          <a
-                            href={downloadHref}
-                            download={doc.fileName}
-                            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-[11px] font-semibold transition-colors inline-flex items-center gap-1.5"
-                            title="Unduh File PDF"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                            <span className="hidden sm:inline">Unduh</span>
-                          </a>
-
-                          {isAdmin && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => openEditModal(doc)}
-                                className="p-1.5 text-slate-400 hover:text-[#2563EB] hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                                title="Edit Kategori / Ganti File PDF"
-                              >
-                                <Edit2 className="w-4 h-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setDocToDelete(doc)}
-                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                                title="Hapus Dokumen"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         {filteredDocuments.length > 0 && (
@@ -748,6 +871,7 @@ export const ProjectDocumentsModule: React.FC<ProjectDocumentsModuleProps> = ({
                 </div>
               )}
               <iframe
+                key={previewDoc.id}
                 src={getDocumentUrl(previewDoc.id, false)}
                 title={previewDoc.fileName}
                 onLoad={() => setPreviewLoading(false)}

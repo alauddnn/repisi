@@ -58,7 +58,10 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
 
   if (!response.ok) {
-    let errorMsg = `Permintaan gagal (Status HTTP ${response.status}${response.statusText ? ` - ${response.statusText}` : ''})`;
+    let errorMsg =
+      response.status === 413
+        ? 'Ukuran file PDF terlalu besar untuk upload fallback server (maks. ~3,2 MB). Kompres file PDF atau aktifkan SUPABASE_SERVICE_ROLE_KEY untuk unggah hingga 15 MB.'
+        : `Permintaan gagal (Status HTTP ${response.status}${response.statusText ? ` - ${response.statusText}` : ''})`;
     let errorMeta: any = null;
     try {
       const rawText = await response.text();
@@ -76,7 +79,13 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
         }
       } catch {
         const clean = rawText.trim();
-        if (clean && clean.length < 250 && !clean.includes('<!DOCTYPE') && !clean.includes('<html')) {
+        if (
+          response.status !== 413 &&
+          clean &&
+          clean.length < 250 &&
+          !clean.includes('<!DOCTYPE') &&
+          !clean.includes('<html')
+        ) {
           errorMsg = clean;
         }
       }
@@ -437,7 +446,17 @@ export const api = {
       }
     }
 
-    // Fallback to server base64 upload (best effort up to ~3.2MB on Vercel or 15MB locally)
+    // Fallback to server base64 upload (up to ~3.2MB on Vercel serverless, 15MB locally)
+    const isRemoteHost =
+      typeof window !== 'undefined' &&
+      window.location.hostname !== 'localhost' &&
+      window.location.hostname !== '127.0.0.1';
+    if (isRemoteHost && file.size > 3.2 * 1024 * 1024) {
+      throw new Error(
+        `Ukuran file ${(file.size / (1024 * 1024)).toFixed(2)} MB melebihi batas upload fallback Vercel (maks. ~3,2 MB karena Signed URL Supabase Storage belum aktif). Harap kompres PDF atau tambahkan SUPABASE_SERVICE_ROLE_KEY pada Environment Variables.`
+      );
+    }
+
     const dataBase64 = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);

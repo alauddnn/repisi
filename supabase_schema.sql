@@ -319,8 +319,10 @@ CREATE TABLE IF NOT EXISTS project_documents (
   file_size INT NOT NULL DEFAULT 0,
   mime_type VARCHAR(100) NOT NULL DEFAULT 'application/pdf',
   uploaded_by VARCHAR(150),
+  file_data BYTEA,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE project_documents ADD COLUMN IF NOT EXISTS file_data BYTEA;
 CREATE INDEX IF NOT EXISTS idx_project_documents_proj_created ON project_documents(project_id, created_at DESC);
 

@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import crypto from 'crypto';
 
 const DEFAULT_SUPABASE_URL = 'https://wrphgazcvapjbwlaryny.supabase.co';
@@ -11,9 +12,21 @@ export const MAX_DOCUMENT_FILE_SIZE = 15 * 1024 * 1024; // 15 MB (for PDFs via s
 export const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
 export const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
 
-// Storage directory for local fallback (resilience across offline / test setups)
-const UPLOADS_DIR = path.resolve(process.cwd(), 'data', 'uploads', 'expense-receipts');
-const DOCUMENTS_UPLOADS_DIR = path.resolve(process.cwd(), 'data', 'uploads', 'project-documents');
+export function isServerlessReadOnly(): boolean {
+  return Boolean(
+    process.env.VERCEL ||
+      process.env.AWS_LAMBDA_FUNCTION_NAME ||
+      process.cwd().startsWith('/var/task')
+  );
+}
+
+// Storage directory for local fallback (use /tmp if running inside read-only serverless container)
+const BASE_LOCAL_UPLOADS = isServerlessReadOnly()
+  ? path.join(os.tmpdir(), 'kms-uploads')
+  : path.resolve(process.cwd(), 'data', 'uploads');
+
+const UPLOADS_DIR = path.join(BASE_LOCAL_UPLOADS, 'expense-receipts');
+const DOCUMENTS_UPLOADS_DIR = path.join(BASE_LOCAL_UPLOADS, 'project-documents');
 
 function ensureUploadsDir() {
   if (!fs.existsSync(UPLOADS_DIR)) {
@@ -431,9 +444,18 @@ export async function uploadDocumentToStorage(
   buffer: Buffer,
   originalFileName: string,
   projectId: string
-): Promise<{ filePath: string; storageBucket: string; storageType: 'supabase' | 'local'; signedUrl?: string }> {
+): Promise<{
+  filePath: string;
+  storageBucket: string;
+  storageType: 'supabase' | 'local' | 'failed';
+  signedUrl?: string;
+  supabaseError?: string;
+}> {
   const remotePath = buildDocumentRemotePath(projectId, originalFileName);
   const client = getBackendSupabaseClient();
+  let lastSupabaseError = client
+    ? ''
+    : 'Supabase Storage key belum terkonfigurasi di server (SUPABASE_SERVICE_ROLE_KEY / SUPABASE_ANON_KEY).';
 
   if (client) {
     const preferredBucket = await resolveDocumentBucket(client);
@@ -462,15 +484,28 @@ export async function uploadDocumentToStorage(
           };
         }
         if (error) {
+          lastSupabaseError = `Bucket '${bucket}': ${error.message}`;
           console.warn(`Supabase PDF upload attempt on bucket '${bucket}' failed:`, error.message);
         }
       } catch (err: any) {
+        lastSupabaseError = `Bucket '${bucket}': ${err?.message || String(err)}`;
         console.warn(`Error uploading PDF to bucket '${bucket}':`, err?.message || err);
       }
     }
   }
 
-  // Local persistent fallback (safe for local dev / offline usage)
+  // IMPORTANT: On serverless read-only environments (e.g., Vercel /var/task), local disk or /tmp is NOT persistent.
+  // Signal 'failed' so the API stores the PDF permanently in PostgreSQL BYTEA instead of losing data across cold starts.
+  if (isServerlessReadOnly()) {
+    return {
+      filePath: '',
+      storageBucket: 'none',
+      storageType: 'failed',
+      supabaseError: lastSupabaseError,
+    };
+  }
+
+  // Local persistent fallback (safe for local dev / VPS with persistent disk)
   ensureDocumentsUploadsDir();
   const safeProj = String(projectId || 'general').replace(/[^a-zA-Z0-9_-]/g, '_');
   const localSubdir = path.join(DOCUMENTS_UPLOADS_DIR, safeProj);
@@ -493,7 +528,12 @@ export async function getDocumentSignedUrl(
   bucketName?: string,
   expiresIn = 3600
 ): Promise<string | null> {
-  if (!filePath || filePath.startsWith('local-doc://') || filePath.startsWith('local://')) {
+  if (
+    !filePath ||
+    filePath.startsWith('pg-bytea://') ||
+    filePath.startsWith('local-doc://') ||
+    filePath.startsWith('local://')
+  ) {
     return null;
   }
   const client = getBackendSupabaseClient();
@@ -519,7 +559,7 @@ export async function downloadDocumentBuffer(
   filePath: string,
   bucketName?: string
 ): Promise<{ buffer: Buffer; mimeType: string; fileName: string } | null> {
-  if (!filePath) return null;
+  if (!filePath || filePath.startsWith('pg-bytea://')) return null;
 
   if (filePath.startsWith('local-doc://')) {
     const relative = filePath.replace('local-doc://', '');
@@ -583,7 +623,7 @@ export async function downloadDocumentBuffer(
 }
 
 export async function deleteDocumentFromStorage(filePath: string, bucketName?: string): Promise<boolean> {
-  if (!filePath) return true;
+  if (!filePath || filePath.startsWith('pg-bytea://')) return true;
 
   if (filePath.startsWith('local-doc://')) {
     const relative = filePath.replace('local-doc://', '');

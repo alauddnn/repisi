@@ -1856,10 +1856,12 @@ router.post('/projects/:id/documents', async (req: Request, res: Response) => {
   }
 
   const safeCategory = ALLOWED_DOCUMENT_CATEGORIES.includes(category) ? category : 'Lainnya';
+  const docId = `DOC-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
   let resolvedPath = typeof filePath === 'string' ? filePath.trim() : '';
   let resolvedBucket = typeof storageBucket === 'string' && storageBucket.trim() ? storageBucket.trim() : 'project-documents';
   let resolvedSize = Math.max(0, Math.round(Number(fileSize) || 0));
   let resolvedMime = 'application/pdf';
+  let resolvedFileData: Buffer | null = null;
 
   // Fallback upload path when dataBase64 is supplied
   if (!resolvedPath && dataBase64 && typeof dataBase64 === 'string') {
@@ -1871,8 +1873,20 @@ router.post('/projects/:id/documents', async (req: Request, res: Response) => {
         return res.status(400).json({ error: validation.error || 'File PDF tidak valid.' });
       }
       const uploadRes = await uploadDocumentToStorage(buffer, fileName, projectId);
-      resolvedPath = uploadRes.filePath;
-      resolvedBucket = uploadRes.storageBucket;
+      if (uploadRes.storageType === 'failed') {
+        if (isPostgresConfigured) {
+          resolvedPath = `pg-bytea://${docId}`;
+          resolvedBucket = 'postgres-db';
+          resolvedFileData = buffer;
+        } else {
+          return res.status(500).json({
+            error: `Penyimpanan cloud PDF belum siap: ${uploadRes.supabaseError || 'Storage tidak tersedia di lingkungan serverless.'}`,
+          });
+        }
+      } else {
+        resolvedPath = uploadRes.filePath;
+        resolvedBucket = uploadRes.storageBucket;
+      }
       resolvedSize = buffer.length;
       resolvedMime = validation.mimeType;
     } catch (err: any) {
@@ -1883,8 +1897,6 @@ router.post('/projects/:id/documents', async (req: Request, res: Response) => {
   if (!resolvedPath) {
     return res.status(400).json({ error: 'File PDF wajib diunggah terlebih dahulu.' });
   }
-
-  const docId = `DOC-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
   if (isPostgresConfigured) {
     try {
@@ -1898,6 +1910,7 @@ router.post('/projects/:id/documents', async (req: Request, res: Response) => {
         fileSize: resolvedSize,
         mimeType: resolvedMime,
         uploadedBy: user.name,
+        fileData: resolvedFileData,
       });
       await insertAuditLog(
         user.name,
@@ -1961,6 +1974,7 @@ router.put('/projects/:id/documents/:docId', async (req: Request, res: Response)
   let nextBucket = typeof storageBucket === 'string' && storageBucket.trim() ? storageBucket.trim() : undefined;
   let nextSize = fileSize !== undefined ? Math.max(0, Math.round(Number(fileSize) || 0)) : undefined;
   let nextMime = nextFilePath ? 'application/pdf' : undefined;
+  let nextFileData: Buffer | null | undefined = nextFilePath ? null : undefined;
 
   if (!nextFilePath && dataBase64 && typeof dataBase64 === 'string') {
     try {
@@ -1972,8 +1986,21 @@ router.put('/projects/:id/documents/:docId', async (req: Request, res: Response)
         return res.status(400).json({ error: validation.error || 'File PDF pengganti tidak valid.' });
       }
       const uploadRes = await uploadDocumentToStorage(buffer, targetName, projectId);
-      nextFilePath = uploadRes.filePath;
-      nextBucket = uploadRes.storageBucket;
+      if (uploadRes.storageType === 'failed') {
+        if (isPostgresConfigured) {
+          nextFilePath = `pg-bytea://${docId}`;
+          nextBucket = 'postgres-db';
+          nextFileData = buffer;
+        } else {
+          return res.status(500).json({
+            error: `Penyimpanan cloud PDF belum siap: ${uploadRes.supabaseError || 'Storage tidak tersedia di lingkungan serverless.'}`,
+          });
+        }
+      } else {
+        nextFilePath = uploadRes.filePath;
+        nextBucket = uploadRes.storageBucket;
+        nextFileData = null;
+      }
       nextSize = buffer.length;
       nextMime = validation.mimeType;
     } catch (err: any) {
@@ -1990,6 +2017,7 @@ router.put('/projects/:id/documents/:docId', async (req: Request, res: Response)
         storageBucket: nextBucket,
         fileSize: nextSize,
         mimeType: nextMime,
+        fileData: nextFileData,
       });
       if (oldFilePath) {
         try {
@@ -2129,6 +2157,21 @@ router.get('/projects/documents/:docId/view', async (req: Request, res: Response
   }
 
   const isDownload = req.query.download === 'true';
+
+  if (doc.filePath.startsWith('pg-bytea://') && isPostgresConfigured) {
+    const pgBuffer = await pgService.getProjectDocumentFileData(doc.id);
+    if (pgBuffer) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+      res.setHeader(
+        'Content-Disposition',
+        `${isDownload ? 'attachment' : 'inline'}; filename="${encodeURIComponent(doc.fileName)}"`
+      );
+      return res.send(pgBuffer);
+    }
+    return res.status(404).json({ error: 'Data biner PDF tidak ditemukan di database.' });
+  }
+
   const fileData = await downloadDocumentBuffer(doc.filePath, doc.storageBucket);
   if (fileData) {
     res.setHeader('Content-Type', 'application/pdf');
